@@ -25,12 +25,14 @@ SSLClient::SSLClient(   Client& client,
                         const br_x509_trust_anchor *trust_anchors, 
                         const size_t trust_anchors_num, 
                         const int analog_pin, 
+                        const get_random_t get_random_func,
                         const size_t max_sessions,
                         const DebugLevel debug)
     : m_client(client) 
     , m_sessions()
     , m_max_sessions(max_sessions)
     , m_analog_pin(analog_pin)
+    , m_get_random_func(get_random_func)
     , m_debug(debug)
     , m_is_connected(false)
     , m_write_idx(0)
@@ -332,12 +334,14 @@ int SSLClient::m_start_ssl(const char* host, SSLSession* ssl_ses) {
     const char* func_name = __func__;
     // clear the write error
     setWriteError(SSL_OK);
-    // get some random data by reading the analog pin we've been handed
+    // get some random data.
     // we want 128 bits to be safe, as recommended by the bearssl docs
     uint8_t rng_seeds[16];
-    // take the bottom 8 bits of the analog read
-    for (uint8_t i = 0; i < sizeof rng_seeds; i++) 
-        rng_seeds[i] = static_cast<uint8_t>(analogRead(m_analog_pin));
+    if(m_get_random(rng_seeds, sizeof(rng_seeds), 0) != sizeof(rng_seeds)) {
+        m_error("Failed to get random data to seed the bearssl RNG", func_name);
+        setWriteError(SSL_CLIENT_RNG_ERROR);
+        return 0;
+    }
     br_ssl_engine_inject_entropy(&m_sslctx.eng, rng_seeds, sizeof rng_seeds);
     // inject session parameters for faster reconnection, if we have any
     if(ssl_ses != nullptr) {
@@ -601,6 +605,28 @@ int SSLClient::m_get_session_index(const char* host) const {
         }
     }
     // none found
+    return -1;
+}
+
+/* See SSLClient.h */
+uint32_t SSLClient::m_get_random(void *buf, size_t buflen, unsigned int flags){
+
+    if(m_analog_pin >= 0){
+        uint8_t *buf_bytes = (uint8_t *)buf;
+
+        // if we have an analog pin, use it
+        // get some random data by reading the analog pin we've been handed
+        // take the bottom 8 bits of the analog read
+        for (uint8_t i = 0; i < buflen; i++) 
+            buf_bytes[i] = static_cast<uint8_t>(analogRead(m_analog_pin));
+        return buflen;
+    }
+    else if (m_get_random_func != nullptr) {
+        // else use the provided get_random_func
+        return m_get_random_func(buf, buflen, flags);
+    }
+
+    // no randomness available
     return -1;
 }
 

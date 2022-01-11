@@ -54,7 +54,9 @@ public:
         /** An internal error occurred with SSLClient, and you probably need to submit an issue on Github. */
         SSL_INTERNAL_ERROR = 6,
         /** SSLClient detected that there was not enough memory (>8000 bytes) to continue. */
-        SSL_OUT_OF_MEMORY = 7
+        SSL_OUT_OF_MEMORY = 7,
+        /** No randonm seeds were provided, and SSLClient was unable to generate them. */
+        SSL_CLIENT_RNG_ERROR = 8
     };
 
     /**
@@ -77,6 +79,17 @@ public:
     };
 
     /**
+     * @brief Function type for get_random calls. This function sould fill the buffer pointed to by buf
+       with up to buflen random bytes
+     * 
+     * @param buf Pointer to the buffer to fill
+     * @param buflen The length of the buffer
+     * @param flags not used. Included for compatibility with the standard getrandom function.
+     * @return int The number of bytes written to the buffer
+     */
+    typedef ssize_t(*get_random_t)(void *buf, size_t buflen, unsigned int flags);
+
+    /**
      * @brief Initialize SSLClient with all of the prerequisites needed.
      * 
      * @pre You will need to generate an array of trust_anchors (root certificates)
@@ -96,7 +109,8 @@ public:
     explicit SSLClient( Client& client, 
                         const br_x509_trust_anchor *trust_anchors, 
                         const size_t trust_anchors_num, 
-                        const int analog_pin, 
+                        const int analog_pin,
+                        const get_random_t get_random_func,
                         const size_t max_sessions = 1,
                         const DebugLevel debug = SSL_WARN);
 
@@ -400,6 +414,9 @@ private:
     /** utility function to find a session index based off of a host and IP */
     int m_get_session_index(const char* host) const; 
 
+    /** function to get random seed from analog pin or external RNG */
+    uint32_t m_get_random(void *buf, size_t buflen, unsigned int flags);
+
     /** @brief Prints a debugging prefix to all logs, so we can attatch them to useful information */
     void m_print_prefix(const char* func_name, const DebugLevel level) const;
 
@@ -444,6 +461,8 @@ private:
     const size_t m_max_sessions;
     // store the pin to fetch an RNG see from
     const int m_analog_pin;
+    // store the get_random function pointer
+    get_random_t m_get_random_func;
     // store whether to enable debug logging
     const DebugLevel m_debug;
     // store if we are connected in bearssl or not
